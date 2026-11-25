@@ -26,6 +26,12 @@ Microsoft sign-in, Discord Rich Presence, Sentry reporting and changelog integra
 
 **Do not place a private CurseForge API key in a distributed desktop application or pass it into the build.** A key shipped inside a launcher can be extracted by users. CurseForge API access that requires a private key should be provided by a protected backend service rather than embedding the key in Orange Client.
 
+## Local account security
+
+On Windows, Orange Client now encrypts the local account file with Windows Data Protection API (DPAPI). The encrypted file can normally be decrypted only by the same Windows user on the same computer. Existing plaintext `auth.json` files are migrated to DPAPI protection the first time the updated launcher starts.
+
+This protects saved tokens at rest; it does not protect against malware already running as the signed-in Windows user. Non-Windows builds still use the inherited plaintext account-file format and need a separate native-keychain implementation.
+
 ## Signed releases
 
 The optional signed-release workflow requires a trusted code-signing certificate stored as GitHub Actions secrets:
