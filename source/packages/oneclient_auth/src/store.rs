@@ -434,12 +434,12 @@ mod dpapi_tests {
         let encrypted = encrypt_auth_file(plain).expect("DPAPI encryption should succeed");
 
         assert!(encrypted.starts_with(AUTH_FILE_MAGIC));
-        assert_ne!(encrypted, plain);
+        assert_ne!(encrypted.as_slice(), plain.as_slice());
 
         let (decrypted, needs_encryption) =
             decrypt_auth_file(&encrypted).expect("DPAPI decryption should succeed");
         assert!(!needs_encryption);
-        assert_eq!(decrypted, plain);
+        assert_eq!(decrypted.as_slice(), plain.as_slice());
     }
 
     #[test]
@@ -449,7 +449,7 @@ mod dpapi_tests {
             decrypt_auth_file(legacy).expect("legacy JSON should remain readable");
 
         assert!(needs_encryption);
-        assert_eq!(plain, legacy);
+        assert_eq!(plain.as_slice(), legacy.as_slice());
     }
 }
 
