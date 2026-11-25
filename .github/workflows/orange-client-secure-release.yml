@@ -13,23 +13,25 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: "source -> target"
 
+      # Never embed a private CurseForge API key in a distributable desktop app.
       - name: Build portable launcher
         working-directory: source
         env:
           ORANGE_CLIENT_MICROSOFT_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
-          ORANGE_CLIENT_CURSEFORGE_API_KEY: ${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
           ORANGE_CLIENT_DISCORD_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
           ORANGE_CLIENT_SENTRY_DSN: ${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
           ORANGE_CLIENT_CHANGELOG_URL: ${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
@@ -45,7 +47,6 @@ jobs:
         working-directory: source
         env:
           ORANGE_CLIENT_MICROSOFT_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
-          ORANGE_CLIENT_CURSEFORGE_API_KEY: ${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
           ORANGE_CLIENT_DISCORD_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
           ORANGE_CLIENT_SENTRY_DSN: ${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
           ORANGE_CLIENT_CHANGELOG_URL: ${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
@@ -67,7 +68,6 @@ jobs:
             $_.InitialDetectionTime -ge $scanStart -and (($_.Resources -join " ") -match "orange-client")
           }
           if ($detections) { throw "Microsoft Defender detected a threat in a release file. Nothing will be published." }
-          Write-Host "No new Microsoft Defender detections for the release files."
 
       - name: Authenticode-sign and verify both EXE files
         shell: pwsh
@@ -117,7 +117,7 @@ jobs:
           $lines | Set-Content -LiteralPath "SHA256SUMS.txt" -Encoding ascii
 
       - name: Upload signed portable EXE
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Orange-Client-Signed-Portable-Windows-x64
           path: source/target/release/orange-client.exe
@@ -125,7 +125,7 @@ jobs:
           retention-days: 30
 
       - name: Upload signed setup installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Orange-Client-Signed-Setup-Windows-x64
           path: source/target/release/*-setup.exe
@@ -133,7 +133,7 @@ jobs:
           retention-days: 30
 
       - name: Upload SHA-256 checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Orange-Client-Signed-SHA256-Checksums
           path: SHA256SUMS.txt
