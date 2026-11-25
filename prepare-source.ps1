@@ -50,6 +50,10 @@ $securityOverrides = @(
     @{
         Source = "oneclient_auth_error.rs"
         Destination = "packages/oneclient_auth/src/error.rs"
+    },
+    @{
+        Source = "oneclient_constants.rs"
+        Destination = "packages/oneclient_common/src/constants.rs"
     }
 )
 
