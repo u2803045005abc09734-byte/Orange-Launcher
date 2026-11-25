@@ -40,6 +40,22 @@ if ($LASTEXITCODE -ne 0 -or $upstreamCommit -ne "1605bf11248f8cc94eacf8ff1f86981
 git -C $source apply --binary --whitespace=nowarn $patchOutput
 if ($LASTEXITCODE -ne 0) { throw "Orange Client patch did not apply cleanly." }
 
+$cargoManifest = Join-Path $source "Cargo.toml"
+$cargoText = Get-Content -LiteralPath $cargoManifest -Raw
+$metadataAnchor = 'license = "GPL-3.0-only"'
+if (-not $cargoText.Contains('homepage = "https://github.com/u2803045005abc09734-byte/Orange-Launcher"')) {
+    if (-not $cargoText.Contains($metadataAnchor)) {
+        throw "Could not find workspace package metadata anchor in Cargo.toml."
+    }
+    $metadata = @'
+homepage = "https://github.com/u2803045005abc09734-byte/Orange-Launcher"
+repository = "https://github.com/u2803045005abc09734-byte/Orange-Launcher"
+documentation = "https://github.com/u2803045005abc09734-byte/Orange-Launcher#readme"
+'@
+    $cargoText = $cargoText.Replace($metadataAnchor, $metadataAnchor + [Environment]::NewLine + $metadata.TrimEnd())
+    [System.IO.File]::WriteAllText($cargoManifest, $cargoText, [System.Text.UTF8Encoding]::new($false))
+}
+
 $iconFile = Join-Path $brandingDir "orange-icon.png.b64"
 if (-not (Test-Path -LiteralPath $iconFile)) {
     throw "Missing Orange Client icon asset."
