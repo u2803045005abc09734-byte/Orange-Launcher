@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 #[cfg(windows)]
-const AUTH_FILE_MAGIC: &[u8] = b"ORANGE_CLIENT_AUTH_DPAPI_V1\\n";
+const AUTH_FILE_MAGIC: &[u8] = b"ORANGE_CLIENT_AUTH_DPAPI_V1\n";
 
 #[cfg(windows)]
 mod dpapi {
@@ -84,7 +84,7 @@ mod dpapi {
             cb_data: 0,
             pb_data: ptr::null_mut(),
         };
-        let description: Vec<u16> = "Orange Client account data\\0".encode_utf16().collect();
+        let description: Vec<u16> = "Orange Client account data\0".encode_utf16().collect();
 
         let success = unsafe {
             CryptProtectData(
