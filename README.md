@@ -4,24 +4,36 @@ An independently branded community launcher fork for Minecraft, based on the ope
 
 ## Repository layout
 
-- `source/` — complete assembled Orange Client Rust source. The first Windows build workflow populates this folder automatically; afterwards it is committed here so the code is browsable and editable.
-- `orange-client.patch.gz.b64` — compressed source changes applied to the upstream source tag.
-- `orange-client-assets.json` — Orange Client banner and Windows icon assets used during assembly.
-- `.github/workflows/orange-client-build.yml` — reproducible Windows build and installer workflow.
-- `rebuild-source.ps1` — local helper to reconstruct `source/` from the pinned upstream source and Orange Client patch.
+- `source/` — complete assembled Orange Client Rust source.
+- `patch/` and `branding/` — source changes and Orange Client assets used during assembly.
+- `.github/workflows/orange-client-build.yml` — Windows build, Microsoft Defender scan and SHA-256 checksums.
+- `.github/workflows/orange-client-secure-release.yml` — optional Authenticode-signed release workflow.
+- `.github/workflows/rust-security-audit.yml` — scheduled Rust dependency advisory checks.
+- `.github/dependabot.yml` — weekly Cargo and GitHub Actions dependency update checks.
 
 ## Build
 
-Open **Actions → Orange Client Windows Build → Run workflow**. On the first run, the workflow reconstructs and commits the full source tree under `source/`, then builds:
+Open **Actions → Orange Client Windows Build → Run workflow**. The workflow reconstructs the source from the pinned upstream commit and Orange Client patch, then builds:
 
 - `orange-client.exe` (portable)
 - Orange Client NSIS setup installer
 
-Both are uploaded as workflow artifacts. The complete source is retained in this repository under `source/`.
+Both files are scanned with Microsoft Defender on the build runner. SHA-256 checksums are uploaded as a separate artifact.
 
-## First-run service configuration
+## Service configuration
 
-Microsoft sign-in and CurseForge access require project-owned credentials. Add repository Actions secrets named `ORANGE_CLIENT_MICROSOFT_CLIENT_ID` and `ORANGE_CLIENT_CURSEFORGE_API_KEY`. An optional `ORANGE_CLIENT_DISCORD_CLIENT_ID` enables Discord Rich Presence. Without these optional secrets, the launcher can still compile, but the corresponding integrations may be unavailable.
+Microsoft sign-in, Discord Rich Presence, Sentry reporting and changelog integrations can use their respective project configuration values. A Microsoft OAuth client ID and a Discord application client ID are public identifiers, not passwords.
+
+**Do not place a private CurseForge API key in a distributed desktop application or pass it into the build.** A key shipped inside a launcher can be extracted by users. CurseForge API access that requires a private key should be provided by a protected backend service rather than embedding the key in Orange Client.
+
+## Signed releases
+
+The optional signed-release workflow requires a trusted code-signing certificate stored as GitHub Actions secrets:
+
+- `ORANGE_SIGNING_CERT_PFX_BASE64`
+- `ORANGE_SIGNING_CERT_PASSWORD`
+
+Never commit the certificate or password, or send them in a chat. Without these secrets, use the regular unsigned build workflow.
 
 ## Upstream and license
 
