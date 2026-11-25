@@ -50,7 +50,7 @@ jobs:
           git add source
           git commit -m "Add assembled Orange Client source"
           if ($LASTEXITCODE -ne 0) { throw "Could not commit assembled source." }
-          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "HEAD:$env:GITHUB_REF_NAME"
           if ($LASTEXITCODE -ne 0) { throw "Could not push assembled source." }
 
       - name: Install Rust stable
