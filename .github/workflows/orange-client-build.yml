@@ -54,6 +54,10 @@ jobs:
         with:
           workspaces: "source -> target"
 
+      - name: Test Windows account-data protection
+        working-directory: source
+        run: cargo test --locked -p oneclient_auth
+
       # Only public client identifiers / public telemetry configuration are passed.
       # Do NOT pass a private CurseForge API key to a desktop-app build: distributed
       # client binaries can be reverse-engineered, and build scripts inherit env vars.
