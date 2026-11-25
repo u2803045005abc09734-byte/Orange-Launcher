@@ -7,8 +7,9 @@ on:
       - "source/**"
   workflow_dispatch:
 
+# The build only needs to read the repository. It must not be able to push commits.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: orange-client-windows-${{ github.ref }}
@@ -22,12 +23,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Python for icon generation
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -42,37 +44,23 @@ jobs:
         working-directory: source
         run: python ../generate-icon.py
 
-      - name: Commit assembled source to repository
-        shell: pwsh
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add source
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "The assembled source is already up to date."
-          } else {
-            git commit -m "Update assembled Orange Client source"
-            if ($LASTEXITCODE -ne 0) { throw "Could not commit assembled source." }
-            git push origin "HEAD:$env:GITHUB_REF_NAME"
-            if ($LASTEXITCODE -ne 0) { throw "Could not push assembled source." }
-          }
-
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: "source -> target"
 
+      # Only public client identifiers / public telemetry configuration are passed.
+      # Do NOT pass a private CurseForge API key to a desktop-app build: distributed
+      # client binaries can be reverse-engineered, and build scripts inherit env vars.
       - name: Build portable launcher executable
         working-directory: source
         env:
           ORANGE_CLIENT_MICROSOFT_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
-          ORANGE_CLIENT_CURSEFORGE_API_KEY: ${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
           ORANGE_CLIENT_DISCORD_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
           ORANGE_CLIENT_SENTRY_DSN: ${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
           ORANGE_CLIENT_CHANGELOG_URL: ${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
@@ -88,14 +76,41 @@ jobs:
         working-directory: source
         env:
           ORANGE_CLIENT_MICROSOFT_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
-          ORANGE_CLIENT_CURSEFORGE_API_KEY: ${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
           ORANGE_CLIENT_DISCORD_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
           ORANGE_CLIENT_SENTRY_DSN: ${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
           ORANGE_CLIENT_CHANGELOG_URL: ${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
         run: cargo packager --release -p oneclient_app --formats nsis
 
+      - name: Scan release files with Microsoft Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $files = @(Get-Item "source/target/release/orange-client.exe"; Get-ChildItem "source/target/release/*-setup.exe" -File)
+          if ($files.Count -lt 2) { throw "The portable app or setup installer is missing." }
+          if (-not (Get-Command Start-MpScan -ErrorAction SilentlyContinue)) { throw "Microsoft Defender scan cmdlet is unavailable." }
+          $scanStart = Get-Date
+          foreach ($file in $files) {
+            Write-Host "Scanning $($file.Name)..."
+            Start-MpScan -ScanType CustomScan -ScanPath $file.FullName
+          }
+          $detections = Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object {
+            $_.InitialDetectionTime -ge $scanStart -and (($_.Resources -join " ") -match "orange-client")
+          }
+          if ($detections) { throw "Microsoft Defender detected a threat in a release file. Nothing will be published." }
+          Write-Host "No new Microsoft Defender detections for the release files."
+
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          $files = @(Get-Item "source/target/release/orange-client.exe"; Get-ChildItem "source/target/release/*-setup.exe" -File)
+          $lines = foreach ($file in $files) {
+            $hash = Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256
+            "$($hash.Hash)  $($file.Name)"
+          }
+          $lines | Set-Content -LiteralPath "SHA256SUMS.txt" -Encoding ascii
+
       - name: Upload portable executable
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Orange-Client-Windows-x64-Portable
           path: source/target/release/orange-client.exe
@@ -103,9 +118,17 @@ jobs:
           retention-days: 14
 
       - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Orange-Client-Windows-x64-Setup
           path: source/target/release/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload SHA-256 checksums
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Orange-Client-Windows-x64-SHA256
+          path: SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
