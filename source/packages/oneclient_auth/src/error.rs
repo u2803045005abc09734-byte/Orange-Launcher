@@ -120,6 +120,9 @@ pub enum AuthError {
     #[error(transparent)]
     Paths(#[from] oneclient_common::PathsError),
 
+    #[error("Windows could not protect or decrypt Orange Client's local account data: {0}")]
+    CredentialProtection(String),
+
     #[error(transparent)]
     Request(#[from] RequestError),
 
