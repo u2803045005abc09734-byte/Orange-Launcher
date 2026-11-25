@@ -40,6 +40,34 @@ if ($LASTEXITCODE -ne 0 -or $upstreamCommit -ne "1605bf11248f8cc94eacf8ff1f86981
 git -C $source apply --binary --whitespace=nowarn $patchOutput
 if ($LASTEXITCODE -ne 0) { throw "Orange Client patch did not apply cleanly." }
 
+# Apply project-owned security overrides after the pinned upstream patch.
+# These files are the source of truth for Orange Client-specific security fixes.
+$securityOverrides = @(
+    @{
+        Source = "oneclient_auth_store.rs"
+        Destination = "packages/oneclient_auth/src/store.rs"
+    },
+    @{
+        Source = "oneclient_auth_error.rs"
+        Destination = "packages/oneclient_auth/src/error.rs"
+    }
+)
+
+$overrideDir = Join-Path $root "overrides"
+foreach ($override in $securityOverrides) {
+    $overridePath = Join-Path $overrideDir $override.Source
+    $destinationPath = Join-Path $source $override.Destination
+    if (-not (Test-Path -LiteralPath $overridePath -PathType Leaf)) {
+        throw "Missing Orange Client security override: $overridePath"
+    }
+    if (-not (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
+        throw "Security override target does not exist: $destinationPath"
+    }
+    Copy-Item -LiteralPath $overridePath -Destination $destinationPath -Force
+}
+
+Write-Host "Orange Client security overrides applied."
+
 $cargoManifest = Join-Path $source "Cargo.toml"
 $cargoText = Get-Content -LiteralPath $cargoManifest -Raw
 $metadataAnchor = 'license = "GPL-3.0-only"'
