@@ -2,6 +2,173 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
+#[cfg(windows)]
+const AUTH_FILE_MAGIC: &[u8] = b"ORANGE_CLIENT_AUTH_DPAPI_V1\\n";
+
+#[cfg(windows)]
+mod dpapi {
+    use std::ffi::c_void;
+    use std::ptr;
+    use std::slice;
+
+    const CRYPTPROTECT_UI_FORBIDDEN: u32 = 0x1;
+
+    #[repr(C)]
+    struct DataBlob {
+        cb_data: u32,
+        pb_data: *mut u8,
+    }
+
+    #[link(name = "Crypt32")]
+    unsafe extern "system" {
+        fn CryptProtectData(
+            data_in: *const DataBlob,
+            description: *const u16,
+            optional_entropy: *const DataBlob,
+            reserved: *mut c_void,
+            prompt: *const c_void,
+            flags: u32,
+            data_out: *mut DataBlob,
+        ) -> i32;
+
+        fn CryptUnprotectData(
+            data_in: *const DataBlob,
+            description: *mut *mut u16,
+            optional_entropy: *const DataBlob,
+            reserved: *mut c_void,
+            prompt: *const c_void,
+            flags: u32,
+            data_out: *mut DataBlob,
+        ) -> i32;
+    }
+
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn LocalFree(memory: *mut c_void) -> *mut c_void;
+    }
+
+    fn take_blob(blob: &mut DataBlob) -> Result<Vec<u8>, String> {
+        if blob.pb_data.is_null() {
+            return if blob.cb_data == 0 {
+                Ok(Vec::new())
+            } else {
+                Err("Windows returned an empty credential buffer.".to_string())
+            };
+        }
+
+        let bytes = unsafe { slice::from_raw_parts(blob.pb_data, blob.cb_data as usize) }.to_vec();
+        unsafe {
+            let _ = LocalFree(blob.pb_data.cast());
+        }
+        blob.pb_data = ptr::null_mut();
+        Ok(bytes)
+    }
+
+    fn discard_blob(blob: &mut DataBlob) {
+        if !blob.pb_data.is_null() {
+            unsafe {
+                let _ = LocalFree(blob.pb_data.cast());
+            }
+            blob.pb_data = ptr::null_mut();
+        }
+    }
+
+    pub(super) fn protect(plain: &[u8]) -> Result<Vec<u8>, String> {
+        let length = u32::try_from(plain.len())
+            .map_err(|_| "Account data is too large for Windows DPAPI.".to_string())?;
+        let input = DataBlob {
+            cb_data: length,
+            pb_data: plain.as_ptr().cast_mut(),
+        };
+        let mut output = DataBlob {
+            cb_data: 0,
+            pb_data: ptr::null_mut(),
+        };
+        let description: Vec<u16> = "Orange Client account data\\0".encode_utf16().collect();
+
+        let success = unsafe {
+            CryptProtectData(
+                &input,
+                description.as_ptr(),
+                ptr::null(),
+                ptr::null_mut(),
+                ptr::null(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut output,
+            )
+        };
+
+        if success == 0 {
+            discard_blob(&mut output);
+            return Err(format!(
+                "Windows DPAPI encryption failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+
+        take_blob(&mut output)
+    }
+
+    pub(super) fn unprotect(ciphertext: &[u8]) -> Result<Vec<u8>, String> {
+        let length = u32::try_from(ciphertext.len())
+            .map_err(|_| "Encrypted account data is too large for Windows DPAPI.".to_string())?;
+        let input = DataBlob {
+            cb_data: length,
+            pb_data: ciphertext.as_ptr().cast_mut(),
+        };
+        let mut output = DataBlob {
+            cb_data: 0,
+            pb_data: ptr::null_mut(),
+        };
+        let mut description: *mut u16 = ptr::null_mut();
+
+        let success = unsafe {
+            CryptUnprotectData(
+                &input,
+                &mut description,
+                ptr::null(),
+                ptr::null_mut(),
+                ptr::null(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut output,
+            )
+        };
+
+        if !description.is_null() {
+            unsafe {
+                let _ = LocalFree(description.cast());
+            }
+        }
+
+        if success == 0 {
+            discard_blob(&mut output);
+            return Err(format!(
+                "Windows DPAPI decryption failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+
+        take_blob(&mut output)
+    }
+}
+
+#[cfg(windows)]
+fn encrypt_auth_file(plain: &[u8]) -> Result<Vec<u8>, String> {
+    let encrypted = dpapi::protect(plain)?;
+    let mut result = Vec::with_capacity(AUTH_FILE_MAGIC.len() + encrypted.len());
+    result.extend_from_slice(AUTH_FILE_MAGIC);
+    result.extend_from_slice(&encrypted);
+    Ok(result)
+}
+
+#[cfg(windows)]
+fn decrypt_auth_file(file: &[u8]) -> Result<(Vec<u8>, bool), String> {
+    match file.strip_prefix(AUTH_FILE_MAGIC) {
+        Some(ciphertext) => Ok((dpapi::unprotect(ciphertext)?, false)),
+        None => Ok((file.to_vec(), true)),
+    }
+}
+
 use oneclient_common::paths;
 use oneclient_events::EventBus;
 
@@ -23,20 +190,54 @@ impl CredentialsStore {
             return Ok(Self::default());
         }
 
-        match polyio::read_json(&path).await {
-            Ok(store) => Ok(store),
+        let file = match polyio::read(&path).await {
+            Ok(file) => file,
             Err(err) => {
                 tracing::warn!("failed to read auth file: {err}");
-                Ok(Self::default())
+                return Ok(Self::default());
             }
+        };
+
+        #[cfg(windows)]
+        let (json, needs_encryption) = decrypt_auth_file(&file)
+            .map_err(AuthError::CredentialProtection)?;
+
+        #[cfg(not(windows))]
+        let json = file;
+
+        let store: Self = match serde_json::from_slice(&json) {
+            Ok(store) => store,
+            Err(err) => {
+                tracing::warn!("failed to parse auth file: {err}");
+                return Ok(Self::default());
+            }
+        };
+
+        // Existing Orange Client installs have a plaintext auth.json. Migrate it
+        // immediately on Windows before the account data is used again.
+        #[cfg(windows)]
+        if needs_encryption {
+            tracing::info!("migrating legacy account data to Windows DPAPI protection");
+            store.save().await?;
         }
+
+        Ok(store)
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn save(&self) -> AuthResult<()> {
         let path = paths::auth_file()?;
+        let json = serde_json::to_vec(self).map_err(|err| {
+            AuthError::CredentialProtection(format!("could not serialize account data: {err}"))
+        })?;
 
-        polyio::write_json_atomic(&path, self).await?;
+        #[cfg(windows)]
+        let bytes = encrypt_auth_file(&json).map_err(AuthError::CredentialProtection)?;
+
+        #[cfg(not(windows))]
+        let bytes = json;
+
+        polyio::write_atomic(&path, bytes).await?;
         Ok(())
     }
 
@@ -222,3 +423,33 @@ pub(crate) fn is_transient_auth_error(err: &AuthError) -> bool {
             if source.is_connect() || source.is_timeout()
     )
 }
+
+#[cfg(all(test, windows))]
+mod dpapi_tests {
+    use super::{AUTH_FILE_MAGIC, decrypt_auth_file, encrypt_auth_file};
+
+    #[test]
+    fn account_file_round_trips_through_windows_dpapi() {
+        let plain = br#"{"users":{},"default_user":null}"#;
+        let encrypted = encrypt_auth_file(plain).expect("DPAPI encryption should succeed");
+
+        assert!(encrypted.starts_with(AUTH_FILE_MAGIC));
+        assert_ne!(encrypted, plain);
+
+        let (decrypted, needs_encryption) =
+            decrypt_auth_file(&encrypted).expect("DPAPI decryption should succeed");
+        assert!(!needs_encryption);
+        assert_eq!(decrypted, plain);
+    }
+
+    #[test]
+    fn legacy_plaintext_account_file_is_detected_for_migration() {
+        let legacy = br#"{"users":{},"default_user":null}"#;
+        let (plain, needs_encryption) =
+            decrypt_auth_file(legacy).expect("legacy JSON should remain readable");
+
+        assert!(needs_encryption);
+        assert_eq!(plain, legacy);
+    }
+}
+
