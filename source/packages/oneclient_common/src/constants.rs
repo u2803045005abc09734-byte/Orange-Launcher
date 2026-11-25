@@ -5,10 +5,9 @@ pub const MICROSOFT_CLIENT_ID: &str = match option_env!("ORANGE_CLIENT_MICROSOFT
     None => "",
 };
 pub const MINECRAFT_SCOPES: &str = "XboxLive.SignIn XboxLive.offline_access";
-pub const CURSEFORGE_API_KEY: &str = match option_env!("ORANGE_CLIENT_CURSEFORGE_API_KEY") {
-    Some(key) => key,
-    None => "",
-};
+// Never embed a private CurseForge API key in a distributed desktop application.
+// Requests requiring private credentials must go through a protected backend.
+pub const CURSEFORGE_API_KEY: &str = "";
 pub const DISCORD_CLIENT_ID: &str = match option_env!("ORANGE_CLIENT_DISCORD_CLIENT_ID") {
     Some(id) => id,
     None => "",
