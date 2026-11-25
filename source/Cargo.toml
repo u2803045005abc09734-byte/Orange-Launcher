@@ -120,7 +120,7 @@ open = {version = "=5.4.4", features = ["shellexecute-on-windows"]}
 parking_lot = {version = "=0.12.5"}
 pulldown-cmark = {version = "=0.13.6", default-features = false}
 rand = {version = "=0.10.3"}
-regex = {version = "=1.13.1"}
+regex = {version = "=1.13.2"}
 rfd = {version = "=0.17.2"}
 rust-embed = {version = "=8.12.0", features = ["include-exclude", "compression", "debug-embed"]}
 sanitize-filename = {version = "=0.6.0"}
