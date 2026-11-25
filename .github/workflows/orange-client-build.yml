@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: orange-client-windows-\${{ github.ref }}
+  group: orange-client-windows-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -50,7 +50,7 @@ jobs:
           git add source
           git commit -m "Add assembled Orange Client source"
           if ($LASTEXITCODE -ne 0) { throw "Could not commit assembled source." }
-          git push origin "HEAD:\${{ github.ref_name }}"
+          git push origin "HEAD:${{ github.ref_name }}"
           if ($LASTEXITCODE -ne 0) { throw "Could not push assembled source." }
 
       - name: Install Rust stable
@@ -66,11 +66,11 @@ jobs:
       - name: Build portable launcher executable
         working-directory: source
         env:
-          ORANGE_CLIENT_MICROSOFT_CLIENT_ID: \${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
-          ORANGE_CLIENT_CURSEFORGE_API_KEY: \${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
-          ORANGE_CLIENT_DISCORD_CLIENT_ID: \${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
-          ORANGE_CLIENT_SENTRY_DSN: \${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
-          ORANGE_CLIENT_CHANGELOG_URL: \${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
+          ORANGE_CLIENT_MICROSOFT_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
+          ORANGE_CLIENT_CURSEFORGE_API_KEY: ${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
+          ORANGE_CLIENT_DISCORD_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
+          ORANGE_CLIENT_SENTRY_DSN: ${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
+          ORANGE_CLIENT_CHANGELOG_URL: ${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
         run: cargo build --locked --release -p oneclient_app --bin orange-client
 
       - name: Install NSIS
@@ -82,11 +82,11 @@ jobs:
       - name: Create Windows setup installer
         working-directory: source
         env:
-          ORANGE_CLIENT_MICROSOFT_CLIENT_ID: \${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
-          ORANGE_CLIENT_CURSEFORGE_API_KEY: \${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
-          ORANGE_CLIENT_DISCORD_CLIENT_ID: \${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
-          ORANGE_CLIENT_SENTRY_DSN: \${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
-          ORANGE_CLIENT_CHANGELOG_URL: \${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
+          ORANGE_CLIENT_MICROSOFT_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
+          ORANGE_CLIENT_CURSEFORGE_API_KEY: ${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
+          ORANGE_CLIENT_DISCORD_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
+          ORANGE_CLIENT_SENTRY_DSN: ${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
+          ORANGE_CLIENT_CHANGELOG_URL: ${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
         run: cargo packager --release -p oneclient_app --formats nsis
 
       - name: Upload portable executable
