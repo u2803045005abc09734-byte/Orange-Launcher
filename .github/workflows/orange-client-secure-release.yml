@@ -1,0 +1,141 @@
+name: Orange Client - Signed Windows Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed-windows-release:
+    name: Build, scan and sign Orange Client
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "source -> target"
+
+      - name: Build portable launcher
+        working-directory: source
+        env:
+          ORANGE_CLIENT_MICROSOFT_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
+          ORANGE_CLIENT_CURSEFORGE_API_KEY: ${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
+          ORANGE_CLIENT_DISCORD_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
+          ORANGE_CLIENT_SENTRY_DSN: ${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
+          ORANGE_CLIENT_CHANGELOG_URL: ${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
+        run: cargo build --locked --release -p oneclient_app --bin orange-client
+
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
+
+      - name: Create Windows setup installer
+        working-directory: source
+        env:
+          ORANGE_CLIENT_MICROSOFT_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
+          ORANGE_CLIENT_CURSEFORGE_API_KEY: ${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
+          ORANGE_CLIENT_DISCORD_CLIENT_ID: ${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
+          ORANGE_CLIENT_SENTRY_DSN: ${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
+          ORANGE_CLIENT_CHANGELOG_URL: ${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
+        run: cargo packager --release -p oneclient_app --formats nsis
+
+      - name: Scan release files with Microsoft Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $files = @(Get-Item "source/target/release/orange-client.exe"; Get-ChildItem "source/target/release/*-setup.exe" -File)
+          if ($files.Count -lt 2) { throw "The portable app or setup installer is missing." }
+          if (-not (Get-Command Start-MpScan -ErrorAction SilentlyContinue)) { throw "Microsoft Defender scan cmdlet is unavailable." }
+          $scanStart = Get-Date
+          foreach ($file in $files) {
+            Write-Host "Scanning $($file.Name)..."
+            Start-MpScan -ScanType CustomScan -ScanPath $file.FullName
+          }
+          $detections = Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object {
+            $_.InitialDetectionTime -ge $scanStart -and (($_.Resources -join " ") -match "orange-client")
+          }
+          if ($detections) { throw "Microsoft Defender detected a threat in a release file. Nothing will be published." }
+          Write-Host "No new Microsoft Defender detections for the release files."
+
+      - name: Authenticode-sign and verify both EXE files
+        shell: pwsh
+        env:
+          ORANGE_SIGNING_CERT_PFX_BASE64: ${{ secrets.ORANGE_SIGNING_CERT_PFX_BASE64 }}
+          ORANGE_SIGNING_CERT_PASSWORD: ${{ secrets.ORANGE_SIGNING_CERT_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:ORANGE_SIGNING_CERT_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:ORANGE_SIGNING_CERT_PASSWORD)) {
+            throw "A trusted publisher certificate is required. Add ORANGE_SIGNING_CERT_PFX_BASE64 and ORANGE_SIGNING_CERT_PASSWORD as GitHub Actions secrets."
+          }
+          $sdkBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/bin"
+          $signTool = Get-ChildItem -Path $sdkBin -Filter signtool.exe -Recurse |
+            Where-Object { $_.FullName -match "\\x64\\signtool\.exe$" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signTool) { throw "Windows SDK SignTool was not found." }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "orange-publisher.pfx"
+          try {
+            $pfxBytes = [Convert]::FromBase64String($env:ORANGE_SIGNING_CERT_PFX_BASE64)
+            [System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+            $files = @(Get-Item "source/target/release/orange-client.exe"; Get-ChildItem "source/target/release/*-setup.exe" -File)
+            foreach ($file in $files) {
+              Write-Host "Signing $($file.Name)..."
+              & $signTool.FullName sign /f $pfxPath /p $env:ORANGE_SIGNING_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "Orange Client" $file.FullName
+              if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $($file.Name)." }
+              & $signTool.FullName verify /pa /v $file.FullName
+              if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($file.Name)." }
+              $signature = Get-AuthenticodeSignature -FilePath $file.FullName
+              if ($signature.Status -ne "Valid") { throw "Windows rejected the signature for $($file.Name)." }
+              Write-Host "Verified publisher: $($signature.SignerCertificate.Subject)"
+            }
+          } finally {
+            if (Test-Path $pfxPath) { Remove-Item $pfxPath -Force }
+            Remove-Item Env:ORANGE_SIGNING_CERT_PFX_BASE64 -ErrorAction SilentlyContinue
+            Remove-Item Env:ORANGE_SIGNING_CERT_PASSWORD -ErrorAction SilentlyContinue
+          }
+
+      - name: Generate SHA-256 release checksums
+        shell: pwsh
+        run: |
+          $files = @(Get-Item "source/target/release/orange-client.exe"; Get-ChildItem "source/target/release/*-setup.exe" -File)
+          $lines = foreach ($file in $files) {
+            $hash = Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256
+            "$($hash.Hash)  $($file.Name)"
+          }
+          $lines | Set-Content -LiteralPath "SHA256SUMS.txt" -Encoding ascii
+
+      - name: Upload signed portable EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orange-Client-Signed-Portable-Windows-x64
+          path: source/target/release/orange-client.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload signed setup installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orange-Client-Signed-Setup-Windows-x64
+          path: source/target/release/*-setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload SHA-256 checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orange-Client-Signed-SHA256-Checksums
+          path: SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
