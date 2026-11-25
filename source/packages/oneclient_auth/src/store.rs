@@ -99,11 +99,9 @@ mod dpapi {
         };
 
         if success == 0 {
+            let error = std::io::Error::last_os_error();
             discard_blob(&mut output);
-            return Err(format!(
-                "Windows DPAPI encryption failed: {}",
-                std::io::Error::last_os_error()
-            ));
+            return Err(format!("Windows DPAPI encryption failed: {error}"));
         }
 
         take_blob(&mut output)
@@ -141,11 +139,9 @@ mod dpapi {
         }
 
         if success == 0 {
+            let error = std::io::Error::last_os_error();
             discard_blob(&mut output);
-            return Err(format!(
-                "Windows DPAPI decryption failed: {}",
-                std::io::Error::last_os_error()
-            ));
+            return Err(format!("Windows DPAPI decryption failed: {error}"));
         }
 
         take_blob(&mut output)
