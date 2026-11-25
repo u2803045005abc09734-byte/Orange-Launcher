@@ -1,0 +1,106 @@
+name: Orange Client Windows Build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "source/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: orange-client-windows-\${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    name: Build Orange Client for Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python for icon generation
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Pillow
+        run: python -m pip install --disable-pip-version-check Pillow
+
+      - name: Assemble Orange Client source
+        shell: pwsh
+        run: ./prepare-source.ps1
+
+      - name: Generate Orange Client Windows icon
+        working-directory: source
+        run: python ../generate-icon.py
+
+      - name: Commit assembled source to repository
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source
+          git commit -m "Add assembled Orange Client source"
+          if ($LASTEXITCODE -ne 0) { throw "Could not commit assembled source." }
+          git push origin "HEAD:\${{ github.ref_name }}"
+          if ($LASTEXITCODE -ne 0) { throw "Could not push assembled source." }
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "source -> target"
+
+      - name: Build portable launcher executable
+        working-directory: source
+        env:
+          ORANGE_CLIENT_MICROSOFT_CLIENT_ID: \${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
+          ORANGE_CLIENT_CURSEFORGE_API_KEY: \${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
+          ORANGE_CLIENT_DISCORD_CLIENT_ID: \${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
+          ORANGE_CLIENT_SENTRY_DSN: \${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
+          ORANGE_CLIENT_CHANGELOG_URL: \${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
+        run: cargo build --locked --release -p oneclient_app --bin orange-client
+
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
+
+      - name: Create Windows setup installer
+        working-directory: source
+        env:
+          ORANGE_CLIENT_MICROSOFT_CLIENT_ID: \${{ secrets.ORANGE_CLIENT_MICROSOFT_CLIENT_ID }}
+          ORANGE_CLIENT_CURSEFORGE_API_KEY: \${{ secrets.ORANGE_CLIENT_CURSEFORGE_API_KEY }}
+          ORANGE_CLIENT_DISCORD_CLIENT_ID: \${{ secrets.ORANGE_CLIENT_DISCORD_CLIENT_ID }}
+          ORANGE_CLIENT_SENTRY_DSN: \${{ secrets.ORANGE_CLIENT_SENTRY_DSN }}
+          ORANGE_CLIENT_CHANGELOG_URL: \${{ secrets.ORANGE_CLIENT_CHANGELOG_URL }}
+        run: cargo packager --release -p oneclient_app --formats nsis
+
+      - name: Upload portable executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orange-Client-Windows-x64-Portable
+          path: source/target/release/orange-client.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orange-Client-Windows-x64-Setup
+          path: source/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14
